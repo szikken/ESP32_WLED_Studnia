@@ -1,0 +1,7 @@
+{
+  "name": "TFLunaDistanceSensor",
+  "build": { "libArchive": false },
+  "dependencies": {
+    "budryerson/TFLuna-I2C": "https://github.com/budryerson/TFLuna-I2C"
+  }
+}
