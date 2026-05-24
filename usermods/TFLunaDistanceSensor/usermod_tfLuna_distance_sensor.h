@@ -56,6 +56,23 @@ class UsermodTfLunaDistanceSensor : public Usermod
     int16_t softResetCounter = 0;
     bool publishError = false;
 
+    // Compute median of 5 int16_t values without modifying the source array.
+    // Rejects up to 2 outlier readings out of 5 (e.g. momentary sensor obstruction).
+    static int16_t medianOf5(const int16_t* arr)
+    {
+      int16_t a[5];
+      memcpy(a, arr, 5 * sizeof(int16_t));
+      // Insertion sort — 5 elements, negligible cost
+      for (int i = 1; i < 5; i++)
+      {
+        int16_t key = a[i];
+        int j = i - 1;
+        while (j >= 0 && a[j] > key) { a[j + 1] = a[j]; j--; }
+        a[j + 1] = key;
+      }
+      return a[2]; // middle element = median
+    }
+
     void publishReadInterval()
     {
 #ifndef WLED_DISABLE_MQTT
@@ -178,20 +195,19 @@ class UsermodTfLunaDistanceSensor : public Usermod
       {
         if(publishData)
         {
-          int16_t tfDistAvg = 0;
+          // Median filter for distance — rejects outlier readings (e.g. momentary sensor obstruction)
+          int16_t tfDistAvg = medianOf5(tfDistArray);
+
+          // Arithmetic average for flux and temperature (no outlier concern)
           int32_t tfFluxAvg = 0;
           int16_t tfTempAvg = 0;
-          
-          for (byte i = 0; i < 5; i = i + 1)
+          for (byte i = 0; i < 5; i++)
           {
-            tfDistAvg = tfDistAvg + tfDistArray[i];
-            tfFluxAvg = tfFluxAvg + tfFluxArray[i];
-            tfTempAvg = tfTempAvg + tfTempArray[i];
+            tfFluxAvg += tfFluxArray[i];
+            tfTempAvg += tfTempArray[i];
           }
-
-          tfDistAvg = int16_t (tfDistAvg / 5);
-          tfFluxAvg = int32_t (tfFluxAvg / 5);
-          tfTempAvg = int16_t (tfTempAvg / 5);
+          tfFluxAvg = int32_t(tfFluxAvg / 5);
+          tfTempAvg = int16_t(tfTempAvg / 5);
 
           int16_t tfWaterLvlAvg = 268 - tfDistAvg;
           int16_t tfWaterAmountAvg = 3.14 * 16.0 * (tfWaterLvlAvg / 10.0);
