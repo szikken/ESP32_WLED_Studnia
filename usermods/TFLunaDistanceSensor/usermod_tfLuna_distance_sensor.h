@@ -56,6 +56,12 @@ class UsermodTfLunaDistanceSensor : public Usermod
     int16_t softResetCounter = 0;
     bool publishError = false;
 
+    // Cached values for inter-usermod access (e.g. GardenIrrigation)
+    int16_t lastWaterLevel = 0;   // cm
+    int16_t lastWaterAmount = 0;  // litres
+    bool hasValidData = false;
+    bool sensorOk = true;  // assume OK until first error is reported
+
     // Compute median of 5 int16_t values without modifying the source array.
     // Rejects up to 2 outlier readings out of 5 (e.g. momentary sensor obstruction).
     static int16_t medianOf5(const int16_t* arr)
@@ -97,6 +103,20 @@ class UsermodTfLunaDistanceSensor : public Usermod
     inline void enable(bool enable) { enabled = enable; }
     //Get usermod enabled/disabled state
     inline bool isEnabled() { return enabled; }
+
+    // Unique ID so other usermods can locate this instance via UsermodManager::lookup()
+    inline uint16_t getId() override { return USERMOD_ID_TFLUNADISTANCESENSOR; }
+
+    // --- Inter-usermod data access ---
+    // Returns the latest median-filtered water level in cm.
+    // Valid only when hasData() returns true.
+    inline int16_t getWaterLevel()  const { return lastWaterLevel; }
+    // Returns the latest calculated water volume in litres.
+    inline int16_t getWaterAmount() const { return lastWaterAmount; }
+    // True once the first full set of 5 samples has been processed.
+    inline bool hasData()     const { return hasValidData; }
+    // True when the last measurement cycle succeeded; false after error events.
+    inline bool isSensorOk()  const { return sensorOk; }
 
 #ifndef WLED_DISABLE_MQTT
     /**
@@ -212,6 +232,12 @@ class UsermodTfLunaDistanceSensor : public Usermod
           int16_t tfWaterLvlAvg = 268 - tfDistAvg;
           int16_t tfWaterAmountAvg = 3.14 * 16.0 * (tfWaterLvlAvg / 10.0);
 
+          // Update cached values for other usermods
+          lastWaterLevel = tfWaterLvlAvg;
+          lastWaterAmount = tfWaterAmountAvg;
+          hasValidData = true;
+          sensorOk = true;
+
           strcpy(lidarMqttTopic + lidarMqttTopicLen, "/status");
           mqtt->publish(lidarMqttTopic, 0, false, "true");
           strcpy(lidarMqttTopic + lidarMqttTopicLen, "/distance");
@@ -230,6 +256,8 @@ class UsermodTfLunaDistanceSensor : public Usermod
         }
         else if(publishError)
         {
+          sensorOk = false;
+
           strcpy(lidarMqttTopic + lidarMqttTopicLen, "/status");
           mqtt->publish(lidarMqttTopic, 0, false, "false");
           strcpy(lidarMqttTopic + lidarMqttTopicLen, "/errors");
@@ -291,10 +319,3 @@ class UsermodTfLunaDistanceSensor : public Usermod
     }
 };
 
-const char UsermodTfLunaDistanceSensor::_name[] PROGMEM = "LIDARSensor";
-const char UsermodTfLunaDistanceSensor::_enabled[] PROGMEM = "enabled";
-const char UsermodTfLunaDistanceSensor::_nameReadInterval[] PROGMEM = "LIDARSensor:ReadInterval";
-const char UsermodTfLunaDistanceSensor::_nameDistance[] PROGMEM = "LIDARSensor:Distance";
-const char UsermodTfLunaDistanceSensor::_nameQuality[] PROGMEM = "LIDARSensor:Quality";
-const char UsermodTfLunaDistanceSensor::_nameTemperature[] PROGMEM = "LIDARSensor:Temperature";
-const char UsermodTfLunaDistanceSensor::_nameReadErrors[] PROGMEM = "LIDARSensor:ReadErrors";
