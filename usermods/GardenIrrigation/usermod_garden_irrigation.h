@@ -28,7 +28,7 @@
  *   .../config/critical_level/set       → abort threshold (cm)
  *
  * MQTT status topics (retain where noted):
- *   .../status         idle | running   (retain)
+ *   .../status         OFF | ON          (retain)
  *   .../remaining      MM:SS            (no retain, every statusInterval sec)
  *   .../event          started:Xl | finished:used Xl | aborted:<reason>
  *   .../config/stage1_duration          (retain, echoed on change + connect)
@@ -225,7 +225,7 @@ class GardenIrrigationUsermod : public Usermod {
       setRelay(pumpRelayIndex,   true);
       setRelay(valve1RelayIndex, true);
 
-      publishStatus("running");
+      publishStatus("ON");
 
       char buf[32];
       snprintf(buf, sizeof(buf), "started:%dl", (int)startWaterAmount);
@@ -235,7 +235,7 @@ class GardenIrrigationUsermod : public Usermod {
     void abortIrrigation(const char* reason) {
       stopAll();
       stage = STAGE_IDLE;
-      publishStatus("idle");
+      publishStatus("OFF");
       publishRemaining(0);
       char buf[64];
       snprintf(buf, sizeof(buf), "aborted:%s", reason);
@@ -245,7 +245,7 @@ class GardenIrrigationUsermod : public Usermod {
     void finishIrrigation() {
       stopAll();
       stage = STAGE_IDLE;
-      publishStatus("idle");
+      publishStatus("OFF");
       publishRemaining(0);
       UsermodTfLunaDistanceSensor* tf = getTfLuna();
       int16_t endAmt = (tf && tf->hasData()) ? tf->getWaterAmount() : 0;
@@ -322,7 +322,7 @@ class GardenIrrigationUsermod : public Usermod {
       mqtt->subscribe(sub, 0);
 
       publishAllConfig();
-      publishStatus(stage == STAGE_IDLE ? "idle" : "running");
+      publishStatus(stage == STAGE_IDLE ? "OFF" : "ON");
     }
 
     bool onMqttMessage(char* topic, char* payload) override {
