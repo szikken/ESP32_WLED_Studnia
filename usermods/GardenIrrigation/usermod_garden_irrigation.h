@@ -8,27 +8,36 @@
  * GardenIrrigation usermod
  *
  * Replicates the OpenHab rule_garden_irrigation sequence:
- *   STAGE_0 : pump + valve1 ON  → section1Duration minutes
- *   STAGE_1 : pump + valve1 + valve2 ON → section2Duration minutes
- *   STAGE_2 : pump + valve2 ON  → section3Duration minutes
+ *   STAGE_0 : pump + valve1 ON  → stage1Duration minutes
+ *   STAGE_1 : pump + valve1 + valve2 ON → stage2Duration minutes
+ *   STAGE_2 : pump + valve2 ON  → stage3Duration minutes
  *   IDLE    : all OFF
  *
  * Water level is read from TFLunaDistanceSensor.  Irrigation is aborted
  * when the sensor reports an error or the level drops to/below criticalLevel.
  *
- * OpenHab sends a single MQTT "start" command; all timing and safety logic
+ * OpenHab sends MQTT "on" to the control topic; all timing and safety logic
  * runs inside this usermod.
  *
  * MQTT control topics  (base = {mqttDeviceTopic}/irrigation):
- *   .../start                           → start irrigation
- *   .../stop                            → abort irrigation
- *   .../config/<key>/set                → update config value
+ *   .../control                         → payload "on" = start, "off" = stop
+ *   .../config/stage1_duration/set      → stage 0 duration (minutes, 1-120)
+ *   .../config/stage2_duration/set      → stage 1 duration (minutes, 1-120)
+ *   .../config/stage3_duration/set      → stage 2 duration (minutes, 1-120)
+ *   .../config/min_start_level/set      → minimum water level to allow start (cm)
+ *   .../config/critical_level/set       → abort threshold (cm)
  *
  * MQTT status topics (retain where noted):
  *   .../status         idle | running   (retain)
- *   .../remaining      MM:SS            (no retain, periodic)
+ *   .../remaining      MM:SS            (no retain, every statusInterval sec)
  *   .../event          started:Xl | finished:used Xl | aborted:<reason>
- *   .../config/<key>                    (retain, echoed on change + connect)
+ *   .../config/stage1_duration          (retain, echoed on change + connect)
+ *   .../config/stage2_duration          (retain, echoed on change + connect)
+ *   .../config/stage3_duration          (retain, echoed on change + connect)
+ *   .../config/min_start_level          (retain, echoed on change + connect)
+ *   .../config/critical_level           (retain, echoed on change + connect)
+ *
+ * Relay indices and status interval are configured only via WLED UI (cfg.json).
  *
  * Written and maintained for ESP32_WLED_Studnia project.
  */
@@ -54,15 +63,15 @@ class GardenIrrigationUsermod : public Usermod {
     bool initDone = false;
 
     // ---- configurable parameters ----
-    uint16_t section1Duration = 15;  // minutes
-    uint16_t section2Duration = 5;   // minutes
-    uint16_t section3Duration = 15;  // minutes
+    uint16_t stage1Duration   = 15;  // minutes – pump + valve1
+    uint16_t stage2Duration   = 5;   // minutes – pump + valve1 + valve2
+    uint16_t stage3Duration   = 15;  // minutes – pump + valve2
     int16_t  minStartLevel    = 80;  // cm  – minimum level to allow start
     int16_t  criticalLevel    = 20;  // cm  – abort threshold during irrigation
-    uint16_t statusInterval   = 30;  // seconds – countdown publish interval
-    uint8_t  pumpRelayIndex   = 0;
-    uint8_t  valve1RelayIndex = 1;
-    uint8_t  valve2RelayIndex = 2;
+    uint16_t statusInterval   = 15;  // seconds – countdown publish interval (UI only)
+    uint8_t  pumpRelayIndex   = 0;   // UI only
+    uint8_t  valve1RelayIndex = 1;   // UI only
+    uint8_t  valve2RelayIndex = 2;   // UI only
 
     // MQTT base topic: {mqttDeviceTopic}/irrigation
     char   irrigBase[100];
@@ -71,9 +80,9 @@ class GardenIrrigationUsermod : public Usermod {
     // PROGMEM config keys
     static const char _name[];
     static const char _enabled[];
-    static const char _sec1[];
-    static const char _sec2[];
-    static const char _sec3[];
+    static const char _stg1[];
+    static const char _stg2[];
+    static const char _stg3[];
     static const char _minStart[];
     static const char _critical[];
     static const char _interval[];
@@ -143,7 +152,7 @@ class GardenIrrigationUsermod : public Usermod {
     }
 
     uint32_t totalSeconds() const {
-      return (uint32_t)(section1Duration + section2Duration + section3Duration) * 60UL;
+      return (uint32_t)(stage1Duration + stage2Duration + stage3Duration) * 60UL;
     }
 
     uint32_t remainingSeconds() const {
@@ -154,15 +163,11 @@ class GardenIrrigationUsermod : public Usermod {
     }
 
     void publishAllConfig() {
-      publishConfigUint("section1_duration", section1Duration);
-      publishConfigUint("section2_duration", section2Duration);
-      publishConfigUint("section3_duration", section3Duration);
-      publishConfigUint("min_start_level",   (uint32_t)(int32_t)minStartLevel);
-      publishConfigUint("critical_level",    (uint32_t)(int32_t)criticalLevel);
-      publishConfigUint("status_interval",   statusInterval);
-      publishConfigUint("pump_relay",        pumpRelayIndex);
-      publishConfigUint("valve1_relay",      valve1RelayIndex);
-      publishConfigUint("valve2_relay",      valve2RelayIndex);
+      publishConfigUint("stage1_duration", stage1Duration);
+      publishConfigUint("stage2_duration", stage2Duration);
+      publishConfigUint("stage3_duration", stage3Duration);
+      publishConfigUint("min_start_level", (uint32_t)(int32_t)minStartLevel);
+      publishConfigUint("critical_level",  (uint32_t)(int32_t)criticalLevel);
     }
 
     // Returns false and calls abortIrrigation() if water is insufficient or sensor failed.
@@ -284,21 +289,21 @@ class GardenIrrigationUsermod : public Usermod {
       unsigned long stageElapsed = now - stageStartTime;
 
       if (stage == STAGE_0) {
-        if (stageElapsed >= (unsigned long)section1Duration * 60000UL) {
+        if (stageElapsed >= (unsigned long)stage1Duration * 60000UL) {
           if (!checkWater("s0_end")) return;
           setRelay(valve2RelayIndex, true);   // add valve2
           stage          = STAGE_1;
           stageStartTime = now;
         }
       } else if (stage == STAGE_1) {
-        if (stageElapsed >= (unsigned long)section2Duration * 60000UL) {
+        if (stageElapsed >= (unsigned long)stage2Duration * 60000UL) {
           if (!checkWater("s1_end")) return;
           setRelay(valve1RelayIndex, false);  // remove valve1
           stage          = STAGE_2;
           stageStartTime = now;
         }
       } else if (stage == STAGE_2) {
-        if (stageElapsed >= (unsigned long)section3Duration * 60000UL) {
+        if (stageElapsed >= (unsigned long)stage3Duration * 60000UL) {
           finishIrrigation();
         }
       }
@@ -325,12 +330,9 @@ class GardenIrrigationUsermod : public Usermod {
       if (strncmp_P(topic, PSTR("/irrigation/"), 12) != 0) return false;
       const char* sub = topic + 12;  // after "/irrigation/"
 
-      if (strcmp_P(sub, PSTR("start")) == 0) {
-        startIrrigation();
-        return true;
-      }
-      if (strcmp_P(sub, PSTR("stop")) == 0) {
-        if (stage != STAGE_IDLE) abortIrrigation("manual_stop");
+      if (strcmp_P(sub, PSTR("control")) == 0) {
+        if      (strcmp_P(payload, PSTR("on"))  == 0) startIrrigation();
+        else if (strcmp_P(payload, PSTR("off")) == 0 && stage != STAGE_IDLE) abortIrrigation("manual_stop");
         return true;
       }
 
@@ -338,40 +340,24 @@ class GardenIrrigationUsermod : public Usermod {
         const char* cfg = sub + 7;
         uint32_t val = (uint32_t)strtoul(payload, nullptr, 10);
 
-        if (strcmp_P(cfg, PSTR("section1_duration/set")) == 0) {
-          if (val > 0 && val <= 120) { section1Duration = (uint16_t)val; publishConfigUint("section1_duration", val); serializeConfigToFS(); }
+        if (strcmp_P(cfg, PSTR("stage1_duration/set")) == 0) {
+          if (val > 0 && val <= 120) { stage1Duration = (uint16_t)val; publishConfigUint("stage1_duration", val); serializeConfig(); }
           return true;
         }
-        if (strcmp_P(cfg, PSTR("section2_duration/set")) == 0) {
-          if (val > 0 && val <= 120) { section2Duration = (uint16_t)val; publishConfigUint("section2_duration", val); serializeConfigToFS(); }
+        if (strcmp_P(cfg, PSTR("stage2_duration/set")) == 0) {
+          if (val > 0 && val <= 120) { stage2Duration = (uint16_t)val; publishConfigUint("stage2_duration", val); serializeConfig(); }
           return true;
         }
-        if (strcmp_P(cfg, PSTR("section3_duration/set")) == 0) {
-          if (val > 0 && val <= 120) { section3Duration = (uint16_t)val; publishConfigUint("section3_duration", val); serializeConfigToFS(); }
+        if (strcmp_P(cfg, PSTR("stage3_duration/set")) == 0) {
+          if (val > 0 && val <= 120) { stage3Duration = (uint16_t)val; publishConfigUint("stage3_duration", val); serializeConfig(); }
           return true;
         }
         if (strcmp_P(cfg, PSTR("min_start_level/set")) == 0) {
-          if (val <= 1000) { minStartLevel = (int16_t)val; publishConfigUint("min_start_level", val); serializeConfigToFS(); }
+          if (val <= 1000) { minStartLevel = (int16_t)val; publishConfigUint("min_start_level", val); serializeConfig(); }
           return true;
         }
         if (strcmp_P(cfg, PSTR("critical_level/set")) == 0) {
-          if (val <= 1000) { criticalLevel = (int16_t)val; publishConfigUint("critical_level", val); serializeConfigToFS(); }
-          return true;
-        }
-        if (strcmp_P(cfg, PSTR("status_interval/set")) == 0) {
-          if (val > 0 && val <= 3600) { statusInterval = (uint16_t)val; publishConfigUint("status_interval", val); serializeConfigToFS(); }
-          return true;
-        }
-        if (strcmp_P(cfg, PSTR("pump_relay/set")) == 0) {
-          if (val < MULTI_RELAY_MAX_RELAYS) { pumpRelayIndex = (uint8_t)val; publishConfigUint("pump_relay", val); serializeConfigToFS(); }
-          return true;
-        }
-        if (strcmp_P(cfg, PSTR("valve1_relay/set")) == 0) {
-          if (val < MULTI_RELAY_MAX_RELAYS) { valve1RelayIndex = (uint8_t)val; publishConfigUint("valve1_relay", val); serializeConfigToFS(); }
-          return true;
-        }
-        if (strcmp_P(cfg, PSTR("valve2_relay/set")) == 0) {
-          if (val < MULTI_RELAY_MAX_RELAYS) { valve2RelayIndex = (uint8_t)val; publishConfigUint("valve2_relay", val); serializeConfigToFS(); }
+          if (val <= 1000) { criticalLevel = (int16_t)val; publishConfigUint("critical_level", val); serializeConfig(); }
           return true;
         }
       }
@@ -403,9 +389,9 @@ class GardenIrrigationUsermod : public Usermod {
     void addToConfig(JsonObject& root) override {
       JsonObject top = root.createNestedObject(FPSTR(_name));
       top[FPSTR(_enabled)] = enabled;
-      top[FPSTR(_sec1)]    = section1Duration;
-      top[FPSTR(_sec2)]    = section2Duration;
-      top[FPSTR(_sec3)]    = section3Duration;
+      top[FPSTR(_stg1)]    = stage1Duration;
+      top[FPSTR(_stg2)]    = stage2Duration;
+      top[FPSTR(_stg3)]    = stage3Duration;
       top[FPSTR(_minStart)]  = minStartLevel;
       top[FPSTR(_critical)]  = criticalLevel;
       top[FPSTR(_interval)]  = statusInterval;
@@ -418,9 +404,9 @@ class GardenIrrigationUsermod : public Usermod {
       JsonObject top = root[FPSTR(_name)];
       bool ok = !top.isNull();
       ok &= getJsonValue(top[FPSTR(_enabled)],  enabled);
-      ok &= getJsonValue(top[FPSTR(_sec1)],     section1Duration);
-      ok &= getJsonValue(top[FPSTR(_sec2)],     section2Duration);
-      ok &= getJsonValue(top[FPSTR(_sec3)],     section3Duration);
+      ok &= getJsonValue(top[FPSTR(_stg1)],     stage1Duration);
+      ok &= getJsonValue(top[FPSTR(_stg2)],     stage2Duration);
+      ok &= getJsonValue(top[FPSTR(_stg3)],     stage3Duration);
       ok &= getJsonValue(top[FPSTR(_minStart)], minStartLevel);
       ok &= getJsonValue(top[FPSTR(_critical)], criticalLevel);
       ok &= getJsonValue(top[FPSTR(_interval)], statusInterval);
@@ -434,9 +420,9 @@ class GardenIrrigationUsermod : public Usermod {
 // PROGMEM strings (defined outside the class to satisfy the ODR)
 const char GardenIrrigationUsermod::_name[]    PROGMEM = "GardenIrrigation";
 const char GardenIrrigationUsermod::_enabled[] PROGMEM = "enabled";
-const char GardenIrrigationUsermod::_sec1[]    PROGMEM = "section1_duration_min";
-const char GardenIrrigationUsermod::_sec2[]    PROGMEM = "section2_duration_min";
-const char GardenIrrigationUsermod::_sec3[]    PROGMEM = "section3_duration_min";
+const char GardenIrrigationUsermod::_stg1[]    PROGMEM = "stage1_duration_min";
+const char GardenIrrigationUsermod::_stg2[]    PROGMEM = "stage2_duration_min";
+const char GardenIrrigationUsermod::_stg3[]    PROGMEM = "stage3_duration_min";
 const char GardenIrrigationUsermod::_minStart[] PROGMEM = "min_start_level_cm";
 const char GardenIrrigationUsermod::_critical[] PROGMEM = "critical_level_cm";
 const char GardenIrrigationUsermod::_interval[] PROGMEM = "status_interval_sec";
