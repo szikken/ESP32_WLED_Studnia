@@ -341,23 +341,23 @@ class GardenIrrigationUsermod : public Usermod {
         uint32_t val = (uint32_t)strtoul(payload, nullptr, 10);
 
         if (strcmp_P(cfg, PSTR("stage1_duration/set")) == 0) {
-          if (val > 0 && val <= 120) { stage1Duration = (uint16_t)val; publishConfigUint("stage1_duration", val); serializeConfig(); }
+          if (val > 0 && val <= 120) { stage1Duration = (uint16_t)val; publishConfigUint("stage1_duration", val); serializeConfigToFS(); }
           return true;
         }
         if (strcmp_P(cfg, PSTR("stage2_duration/set")) == 0) {
-          if (val > 0 && val <= 120) { stage2Duration = (uint16_t)val; publishConfigUint("stage2_duration", val); serializeConfig(); }
+          if (val > 0 && val <= 120) { stage2Duration = (uint16_t)val; publishConfigUint("stage2_duration", val); serializeConfigToFS(); }
           return true;
         }
         if (strcmp_P(cfg, PSTR("stage3_duration/set")) == 0) {
-          if (val > 0 && val <= 120) { stage3Duration = (uint16_t)val; publishConfigUint("stage3_duration", val); serializeConfig(); }
+          if (val > 0 && val <= 120) { stage3Duration = (uint16_t)val; publishConfigUint("stage3_duration", val); serializeConfigToFS(); }
           return true;
         }
         if (strcmp_P(cfg, PSTR("min_start_level/set")) == 0) {
-          if (val <= 1000) { minStartLevel = (int16_t)val; publishConfigUint("min_start_level", val); serializeConfig(); }
+          if (val <= 1000) { minStartLevel = (int16_t)val; publishConfigUint("min_start_level", val); serializeConfigToFS(); }
           return true;
         }
         if (strcmp_P(cfg, PSTR("critical_level/set")) == 0) {
-          if (val <= 1000) { criticalLevel = (int16_t)val; publishConfigUint("critical_level", val); serializeConfig(); }
+          if (val <= 1000) { criticalLevel = (int16_t)val; publishConfigUint("critical_level", val); serializeConfigToFS(); }
           return true;
         }
       }
