@@ -331,8 +331,8 @@ class GardenIrrigationUsermod : public Usermod {
       const char* sub = topic + 12;  // after "/irrigation/"
 
       if (strcmp_P(sub, PSTR("control")) == 0) {
-        if      (strcmp_P(payload, PSTR("on"))  == 0) startIrrigation();
-        else if (strcmp_P(payload, PSTR("off")) == 0 && stage != STAGE_IDLE) abortIrrigation("manual_stop");
+        if      (strcmp_P(payload, PSTR("ON"))  == 0) startIrrigation();
+        else if (strcmp_P(payload, PSTR("OFF")) == 0 && stage != STAGE_IDLE) abortIrrigation("manual_stop");
         return true;
       }
 
