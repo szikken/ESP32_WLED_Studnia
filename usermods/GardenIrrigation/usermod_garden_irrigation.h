@@ -226,6 +226,7 @@ class GardenIrrigationUsermod : public Usermod {
       setRelay(valve1RelayIndex, true);
 
       publishStatus("ON");
+      publishRemaining(remainingSeconds());
 
       char buf[32];
       snprintf(buf, sizeof(buf), "started:%dl", (int)startWaterAmount);
