@@ -1,12 +1,14 @@
-# Pre-build script: increment build revision counter and embed it into WLED_RELEASE_NAME.
-# e.g. "ESP32_Studnia" → "ESP32_Studnia_r5"
-# The revision is then visible both in the WLED web UI Info panel and in the output .bin filename.
+# Pre-build script: increment build revision counter.
+# The counter is stored in .build_rev (project root) and read by set_metadata.py
+# which appends "_r<rev>" to WLED_RELEASE_NAME when compiling wled_metadata.cpp.
+# e.g. "ESP32_Studnia" → "ESP32_Studnia_r5" — visible in WLED web UI Info panel
+# and used as the output .bin filename suffix by output_bins.py.
 Import('env')
 import os
 
 
-def _get_next_rev():
-    rev_file = os.path.join(env["PROJECT_DIR"], ".build_rev")
+def _get_next_rev(project_dir):
+    rev_file = os.path.join(project_dir, ".build_rev")
     rev = 1
     if os.path.isfile(rev_file):
         try:
@@ -19,25 +21,10 @@ def _get_next_rev():
     return rev
 
 
-rev = _get_next_rev()
+# Detect clean/fullclean targets to avoid wasting rev numbers.
+from SCons.Script import BUILD_TARGETS
+_is_clean = any(str(t) in ('clean', 'fullclean', 'erase') for t in BUILD_TARGETS)
 
-# Append " r{rev}" to WLED_RELEASE_NAME so it is embedded in the firmware and shown in the web UI.
-# CPPDEFINES values for string macros are stored as \"Name\" (with backslash-escaped quotes).
-new_defines = []
-found = False
-for define in env["CPPDEFINES"]:
-    if isinstance(define, (list, tuple)) and define[0] == "WLED_RELEASE_NAME":
-        found = True
-        # Strip all quote forms the value may use (\"Name\" or "Name")
-        name = str(define[1]).replace('\\"', '').replace('"', '').strip()
-        new_value = f'\\"{name}_r{rev}\\"'
-        new_defines.append(["WLED_RELEASE_NAME", new_value])
-    else:
-        new_defines.append(define)
-
-if not found:
-    print(f"[build_rev] WARNING: WLED_RELEASE_NAME not found in CPPDEFINES — rev not embedded in firmware")
-else:
-    print(f"[build_rev] Build revision {rev} embedded into WLED_RELEASE_NAME")
-
-env.Replace(CPPDEFINES=new_defines)
+if not _is_clean:
+    _rev = _get_next_rev(env["PROJECT_DIR"])
+    print(f"[build_rev] Build revision {_rev}")

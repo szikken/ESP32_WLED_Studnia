@@ -8,10 +8,11 @@ OUTPUT_DIR = "build_output{}".format(os.path.sep)
 #OUTPUT_DIR = os.path.join("build_output")
 
 def _get_cpp_define_value(env, define):
+    # There may be multiple entries (e.g. base env + override env). Return the last one.
     define_list = [item[-1] for item in env["CPPDEFINES"] if item[0] == define]
 
     if define_list:
-        return define_list[0]
+        return define_list[-1]
 
     return None
 
@@ -19,10 +20,21 @@ def _create_dirs(dirs=["map", "release", "firmware"]):
     for d in dirs:
         os.makedirs(os.path.join(OUTPUT_DIR, d), exist_ok=True)
 
+def _get_build_rev():
+    rev_file = os.path.join(env["PROJECT_DIR"], ".build_rev")
+    try:
+        with open(rev_file, "r") as f:
+            return int(f.read().strip())
+    except (ValueError, IOError, OSError):
+        return 0
+
 def create_release(source):
     release_name_def = _get_cpp_define_value(env, "WLED_RELEASE_NAME")
     if release_name_def:
-        release_name = release_name_def.replace("\\\"", "")
+        release_name = release_name_def.replace("\\\"", "").replace('"', '').replace("'", '').strip()
+        rev = _get_build_rev()
+        if rev:
+            release_name = f"{release_name}_r{rev}"
         with open("package.json", "r") as package:
             version = json.load(package)["version"]        
         release_file = os.path.join(OUTPUT_DIR, "release", f"WLED_{version}_{release_name}.bin")

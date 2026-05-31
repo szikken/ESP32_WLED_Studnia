@@ -1,4 +1,5 @@
 Import('env')
+import os
 import subprocess
 import json
 import re
@@ -103,6 +104,34 @@ def add_wled_metadata_flags(env, node):
             cdefs.append(("WLED_REPO", f"\\\"{repo}\\\""))
 
     cdefs.append(("WLED_VERSION", WLED_VERSION))
+
+    # Append build revision suffix to WLED_RELEASE_NAME if .build_rev counter file exists.
+    # The counter is written by build_rev.py (a pre-script that runs before this one).
+    rev_file = os.path.join(env["PROJECT_DIR"], ".build_rev")
+    if os.path.isfile(rev_file):
+        try:
+            with open(rev_file) as _f:
+                _rev = int(_f.read().strip())
+        except (ValueError, IOError):
+            _rev = 0
+        if _rev:
+            import re as _re
+            # Find the last occurrence of WLED_RELEASE_NAME (the most specific one wins).
+            last_idx = -1
+            for i, d in enumerate(cdefs):
+                is_tuple = isinstance(d, (list, tuple))
+                key = d[0] if is_tuple else (d.split("=")[0] if "=" in str(d) else str(d))
+                if key == "WLED_RELEASE_NAME":
+                    last_idx = i
+            if last_idx >= 0:
+                d = cdefs[last_idx]
+                is_tuple = isinstance(d, (list, tuple))
+                raw = _re.sub(r'[\\\'"]', '', str(d[1] if is_tuple else d)).strip()
+                if not is_tuple:
+                    raw = _re.sub(r'^WLED_RELEASE_NAME=', '', raw)
+                if not raw.endswith(f"_r{_rev}"):
+                    cdefs[last_idx] = ("WLED_RELEASE_NAME", f'\\\"{raw}_r{_rev}\\\"')
+                    print(f"[set_metadata] WLED_RELEASE_NAME patched with _r{_rev}")
 
     # This transforms the node in to a Builder; it cannot be modified again
     return env.Object(
